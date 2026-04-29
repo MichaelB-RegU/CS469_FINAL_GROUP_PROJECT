@@ -113,7 +113,7 @@ int main(int argc, char *argv[]) {
         }
 
 
-        char request[BUFFER_SIZE];
+        char request[BUFFER_SIZE + 16];
         snprintf(request, sizeof(request), "GET|%s|END", buffer);
 
         if (write(sockfd, request, strlen(request) + 1) < 0) {
