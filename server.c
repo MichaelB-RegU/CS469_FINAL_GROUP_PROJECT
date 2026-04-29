@@ -1,7 +1,7 @@
 /**
  * A server file designed to connect with a client. For the purposes of 
  * this project, the user must create two concurrent file servers in the 
- * in the event that the connection is severed with the primary server.
+ * event that the connection is severed with the primary server.
  * 
  * @authors Sophie Holland and Mike Bruno
  * @date 27 April 2026
@@ -15,18 +15,27 @@
 #include <stdbool.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <openssl/sha.h>
+
 #ifdef __linux__
 #include <asm-generic/socket.h>
 #endif
 
 #define DEFAULT_PORT 4433
 #define BUFFER_SIZE 256
+#define FILE_BUFFER_SIZE 1024
+#define RESPONSE_SIZE 1200
 #define EXPORT_DIR "./exported_dir"
+
+int create_socket(unsigned int port);
+int valid_filename(const char *filename);
+void hash_data(const unsigned char *data, size_t len, char *hash_output);
 
 int create_socket(unsigned int port) {
     int s;
     struct sockaddr_in addr;
 
+    memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -54,6 +63,31 @@ int create_socket(unsigned int port) {
     return s;
 }
 
+int valid_filename(const char *filename) {
+    if (filename == NULL || strlen(filename) == 0) {
+        return 0;
+    }
+
+
+    if (strstr(filename, "..") || strchr(filename, '/')) {
+        return 0;
+    }
+
+    return 1;
+}
+
+void hash_data(const unsigned char *data, size_t len, char *hash_output) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+
+    SHA256(data, len, hash);
+
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(hash_output + (i * 2), "%02x", hash[i]);
+    }
+
+    hash_output[SHA256_DIGEST_LENGTH * 2] = '\0';
+}
+
 int main(int argc, char *argv[]) {
     unsigned int port = (argc == 2) ? atoi(argv[1]) : DEFAULT_PORT;
 
@@ -65,7 +99,9 @@ int main(int argc, char *argv[]) {
         char buffer[BUFFER_SIZE];
 
         int clientfd = accept(listenfd, (struct sockaddr*)&client, &len);
-        if (clientfd < 0) continue;
+        if (clientfd < 0) {
+            continue;
+        }
 
         printf("Client connected\n");
 
@@ -73,20 +109,26 @@ int main(int argc, char *argv[]) {
             bzero(buffer, BUFFER_SIZE);
 
             int n = read(clientfd, buffer, BUFFER_SIZE - 1);
-            if (n <= 0) break;
+            if (n <= 0) {
+                break;
+            }
 
             buffer[n] = '\0';
 
-            if (strcmp(buffer, "exit") == 0) break;
+            if (strcmp(buffer, "exit") == 0) {
+                break;
+            }
+
 
             char filename[BUFFER_SIZE];
-            if (sscanf(buffer, "GET %s", filename) != 1) {
+
+            if (sscanf(buffer, "GET|%255[^|]|END", filename) != 1) {
                 char *msg = "ERROR invalid request";
                 write(clientfd, msg, strlen(msg) + 1);
                 continue;
             }
 
-            if (strstr(filename, "..")) {
+            if (!valid_filename(filename)) {
                 char *msg = "ERROR forbidden path";
                 write(clientfd, msg, strlen(msg) + 1);
                 continue;
@@ -102,12 +144,17 @@ int main(int argc, char *argv[]) {
                 continue;
             }
 
-            char filedata[1024] = {0};
-            fread(filedata, 1, sizeof(filedata) - 1, fp);
+            char filedata[FILE_BUFFER_SIZE] = {0};
+            size_t bytes_read = fread(filedata, 1, sizeof(filedata) - 1, fp);
             fclose(fp);
 
-            char response[1200];
-            snprintf(response, sizeof(response), "OK %s", filedata);
+
+            char hash_output[(SHA256_DIGEST_LENGTH * 2) + 1];
+            hash_data((unsigned char *)filedata, bytes_read, hash_output);
+
+
+            char response[RESPONSE_SIZE];
+            snprintf(response, sizeof(response), "OK|%s|%s", hash_output, filedata);
 
             write(clientfd, response, strlen(response) + 1);
         }
