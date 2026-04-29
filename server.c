@@ -15,7 +15,9 @@
 #include <stdbool.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#ifdef __linux__
 #include <asm-generic/socket.h>
+#endif
 
 #define DEFAULT_PORT 4433
 #define BUFFER_SIZE 256
