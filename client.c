@@ -18,11 +18,17 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <openssl/sha.h>
 
 #define PRIMARY_PORT 4433
 #define BACKUP_PORT 4434
 #define BUFFER_SIZE 256
+#define RESPONSE_SIZE 1200
 #define MAX_HOST 256
+
+int try_connect(char *host, unsigned int port);
+int connect_any(char *host);
+void hash_data(const unsigned char *data, size_t len, char *hash_output);
 
 int try_connect(char *host, unsigned int port) {
     int sockfd;
@@ -35,6 +41,7 @@ int try_connect(char *host, unsigned int port) {
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) return -1;
 
+    memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     memcpy(&addr.sin_addr.s_addr, server->h_addr, server->h_length);
@@ -70,6 +77,18 @@ int connect_any(char *host) {
     }
 }
 
+void hash_data(const unsigned char *data, size_t len, char *hash_output) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+
+    SHA256(data, len, hash);
+
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        sprintf(hash_output + (i * 2), "%02x", hash[i]);
+    }
+
+    hash_output[SHA256_DIGEST_LENGTH * 2] = '\0';
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         fprintf(stderr, "Usage: client <hostname>\n");
@@ -93,10 +112,10 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        char request[BUFFER_SIZE];
-        snprintf(request, sizeof(request), "GET %s", buffer);
 
-        // SEND (with reconnect)
+        char request[BUFFER_SIZE];
+        snprintf(request, sizeof(request), "GET|%s|END", buffer);
+
         if (write(sockfd, request, strlen(request) + 1) < 0) {
             printf("Connection lost. Reconnecting...\n");
             close(sockfd);
@@ -104,9 +123,10 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        // RECEIVE (with reconnect)
-        bzero(buffer, BUFFER_SIZE);
-        int n = read(sockfd, buffer, BUFFER_SIZE);
+        char response[RESPONSE_SIZE];
+        bzero(response, RESPONSE_SIZE);
+
+        int n = read(sockfd, response, RESPONSE_SIZE - 1);
 
         if (n <= 0) {
             printf("Server disconnected. Reconnecting...\n");
@@ -115,10 +135,32 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        if (strncmp(buffer, "OK", 2) == 0) {
-            printf("%s\n", buffer + 3);
+        response[n] = '\0';
+
+        if (strncmp(response, "OK|", 3) == 0) {
+
+            char received_hash[(SHA256_DIGEST_LENGTH * 2) + 1];
+            char filedata[1024];
+
+            bzero(received_hash, sizeof(received_hash));
+            bzero(filedata, sizeof(filedata));
+
+            if (sscanf(response, "OK|%64[^|]|%1023[^\n]", received_hash, filedata) == 2) {
+                char calculated_hash[(SHA256_DIGEST_LENGTH * 2) + 1];
+
+                hash_data((unsigned char *)filedata, strlen(filedata), calculated_hash);
+
+                if (strcmp(received_hash, calculated_hash) == 0) {
+                    printf("%s\n", filedata);
+                    printf("SHA256 verification passed.\n");
+                } else {
+                    printf("ERROR file integrity check failed.\n");
+                }
+            } else {
+                printf("ERROR invalid response from server.\n");
+            }
         } else {
-            printf("%s\n", buffer);
+            printf("%s\n", response);
         }
     }
 
