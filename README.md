@@ -13,10 +13,11 @@ Fault tolerance is achieved by detecting a primary server failure, and switching
 
 
 ** TO RUN THE CODE** (in your terminal)
-1. run make
-2. run ./server 4433 (or desired port)
-3. run ./server 4434 (or desired failover port) <-- creates failover server
-4. run ./client localhost
-5. You will be prompted to attach a file. For testing, there is an existing test file located within exported_dir of this project. If desired, enter file1.txt.
-6. If you wish to test the failover properties, simply delete the terminal running the primary server. This simulates a severed connection, and the client will automatically connect with the failover server.
+1. Create a test file for yourself within the exported_dir folder. We generally just make a .txt file with assorted information to test.
+2. run make
+3. run ./server 4433 (or desired port)
+4. run ./server 4434 (or desired failover port) <-- creates failover server
+5. run ./client localhost
+6. You will be prompted to attach a file. Use the test file that you created in step 1.
+7. If you wish to test the failover properties, simply delete the terminal running the primary server. This simulates a severed connection, and the client will automatically connect with the failover server.
 
